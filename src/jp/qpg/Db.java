@@ -29,18 +29,20 @@ public class Db implements AutoCloseable {
      * @param args (unuse)
      */
     public static void main(String[] args) {
-        try(Db db = Db.connect("postgresql", "db_fund", "user_fund", "fund_user2013", "localhost", 5432)) {
-           System.out.println(db.from("account").count());
-           System.out.println(db.one("SELECT COUNT(*) FROM account").value);
-           for(Data<Object[]> row : db.select("name", "password").from("account")) {
-                for(int i = 0; i < row.names.length; i++) {
-                    System.out.println(row.names[i] + ": " + row.value[i]);
+        try(Db db = Db.connect("postgresql", "db_fund", "user_fund", "fund_user2013")) {
+            System.out.println(db.tables());
+            System.out.println(db.from("account").count());
+            System.out.println(db.one("SELECT COUNT(*) FROM account").value);
+            for(Data<Object[]> row : db.select("name", "password").from("account")) {
+            for(int i = 0; i < row.names.length; i++) {
+                System.out.println(row.names[i] + ": " + row.value[i]);
                 }
             }
         } catch (SQLException e) {
             e.printStackTrace();
         }
-        try(Db db = Db.connect("oracle", "OSS", "db_kjk", "kjk_db20120401", "localhost", 1521)) {
+        try(Db db = Db.connect("oracle", "OSS", "db_kjk", "kjk_db20120401")) {
+            System.out.println(db.tables());
             for(Data<Object[]> row : db.select("name", "passwd").from("M_SYAIN").where("userid", "mor-shim")) {
                 for(int i = 0; i < row.names.length; i++) {
                     System.out.println(row.names[i] + ": " + row.value[i]);
@@ -49,7 +51,8 @@ public class Db implements AutoCloseable {
         } catch (SQLException e) {
             e.printStackTrace();
         }
-        try(Db db = Db.connect("mysql", "db_cms", "root", "", "localhost", 3306)) {
+        try(Db db = Db.connect("mysql", "db_cms", "root", "")) {
+            System.out.println(db.tables());
             for(Data<Object[]> row : db.select("user_name", "password").from("t_user").where("login_id", "ShimizuY")) {
                 for(int i = 0; i < row.names.length; i++) {
                     System.out.println(row.names[i] + ": " + row.value[i]);
@@ -58,7 +61,8 @@ public class Db implements AutoCloseable {
         } catch (SQLException e) {
             e.printStackTrace();
         }
-        try(Db db = Db.connect("sqlserver", "aspnet-mvc4-20130513194150", "sa", "sql@20130615", "localhost", 1433)) {
+        try(Db db = Db.connect("sqlserver", "aspnet-mvc4-20130513194150", "sa", "sql@20130615")) {
+            System.out.println(db.tables());
             for(Data<Object[]> row : db.select("UserId", "UserName").from("UserProfile").where("UserId", 1)) {
                 for(int i = 0; i < row.names.length; i++) {
                     System.out.println(row.names[i] + ": " + row.value[i]);
@@ -68,21 +72,21 @@ public class Db implements AutoCloseable {
             e.printStackTrace();
         }
         try(Db db = Db.connect("h2", "mem:test")) {
-            db.execute("create table account (id int primary key,name varchar)");
-            db.execute("insert into account values (1, '氏名')");
+            if(!db.tables().contains("account")) db.execute("create table account (id int primary key,name varchar)");
+            if(!db.from("account").exists()) db.execute("insert into account values (1, '氏名')");
             for(Data<Object[]> row : db.select("id", "name").from("account").where("id", 1)) {
                 for(int i = 0; i < row.names.length; i++) {
                     System.out.println(row.names[i] + ": " + row.value[i]);
                 }
             }
+            db.truncate("account");
+            System.out.println(db.from("account").count());
         } catch (SQLException e) {
             e.printStackTrace();
         }
         try(Db db = Db.connect("h2", "~/test")) {
-            if(!db.from("account").exists()) {
-                db.execute("create table account (id int primary key,name varchar)");
-                db.execute("insert into account values (1, '氏名')");
-            }
+            if(!db.tables().contains("account")) db.execute("create table account (id int primary key,name varchar)");
+            if(!db.from("account").exists()) db.execute("insert into account values (1, '氏名')");
             for(Data<Object[]> row : db.select("id", "name").from("account").where("id", 1)) {
                 for(int i = 0; i < row.names.length; i++) {
                     System.out.println(row.names[i] + ": " + row.value[i]);
@@ -93,7 +97,23 @@ public class Db implements AutoCloseable {
         }
     }
 
+    private void truncate(String table) throws SQLException {
+        execute("TRUNCATE TABLE " + table);
+    }
+
+    private List<String> tables() throws SQLException {
+        List<String> list = new ArrayList<>();
+        try(RowIterator<Object[]> it = new RowIterator<Object[]>(connection.getMetaData().getTables(null, schema, null, new String[]{"TABLE"}), new ObjectFetcher())) {;
+            for(Object[] row : it) {
+//                for(int i = 0, i2 = it.names.length; i < i2; i++) System.out.print(it.names[i] + ":" + row[i] + ", "); System.out.println();
+                list.add(String.valueOf(row[2]).toLowerCase());
+            }
+        }
+        return list;
+    }
+
     private Connection connection;
+    String schema;
     public static SimpleDateFormat format = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss.SSS ");
 
     public static void log(Object o) {
@@ -118,40 +138,14 @@ public class Db implements AutoCloseable {
 
     public int execute(String sql) throws SQLException {
         log(sql + ";");
-        return connection.prepareStatement(sql).executeUpdate();
+        try(PreparedStatement statement = connection.prepareStatement(sql)) {
+            return statement.executeUpdate();
+        }
     }
 
-    public RowIterator<Object[]> rowIterator(String sql) {
-        try {
-            log(sql + ";");
-            return new RowIterator<>(connection.prepareStatement(sql), new Fetcher<Object[]>() {
-                RowIterator<Object[]> it;
-                Object[] values;
-                int i2;
-
-                @Override
-                public void setup(RowIterator<Object[]> it) {
-                    this.it = it;
-                    i2 = it.columns;
-                    values = new Object[i2];
-                }
-
-                @Override
-                public Object[] fetch(ResultSet row) {
-                    try {
-                        for(int i = 0; i < i2; i++) values[i] = row.getObject(i + 1);
-                    } catch (SQLException e) {
-                        e.printStackTrace();
-                        it.close();
-                        return null;
-                    }
-                    return values;
-                }
-            });
-        } catch(SQLException e) {
-            e.printStackTrace();
-            return null;
-        }
+    public RowIterator<Object[]> rowIterator(String sql) throws SQLException {
+        log(sql + ";");
+        return new RowIterator<>(connection.prepareStatement(sql), new ObjectFetcher());
     }
 
     public List<Map<String, Object>> query(String sql) throws SQLException {
@@ -295,30 +289,49 @@ public class Db implements AutoCloseable {
             return addWhere(field + " = " + value);
         }
 
-        public RowIterator<Object[]> rowIterator() {
+        public RowIterator<Object[]> rowIterator() throws SQLException {
             return db.rowIterator(sql());
         }
 
         @Override
         public Iterator<Data<Object[]>> iterator() {
-            return new Iterator<Data<Object[]>>() {
-                RowIterator<Object[]> it = rowIterator();
+            try {
+                return new Iterator<Data<Object[]>>() {
+                    RowIterator<Object[]> it = rowIterator();
 
-                @Override
-                public boolean hasNext() {
-                    return it.hasNext();
-                }
+                    @Override
+                    public boolean hasNext() {
+                        return it.hasNext();
+                    }
 
-                @Override
-                public Data<Object[]> next() {
-                    return new Data<>(it.names, it.next());
-                }
+                    @Override
+                    public Data<Object[]> next() {
+                        return new Data<>(it.names, it.next());
+                    }
 
-                @Override
-                public void remove() {
-                    it.remove();
-                }
-            };
+                    @Override
+                    public void remove() {
+                        it.remove();
+                    }
+                };
+            } catch (SQLException e) {
+                e.printStackTrace();
+                return new Iterator<Data<Object[]>>() {
+                    @Override
+                    public boolean hasNext() {
+                        return false;
+                    }
+
+                    @Override
+                    public Data<Object[]> next() {
+                        return null;
+                    }
+
+                    @Override
+                    public void remove() {
+                    }
+                };
+            }
         }
 
         public Data<Object[]> row() throws SQLException {
@@ -359,25 +372,52 @@ public class Db implements AutoCloseable {
         T fetch(ResultSet row);
     }
 
+    public static class ObjectFetcher implements Fetcher<Object[]> {
+        RowIterator<Object[]> it;
+        Object[] values;
+        int columns;
+
+        @Override
+        public void setup(RowIterator<Object[]> it) {
+            this.it = it;
+            columns = it.names.length;
+            values = new Object[columns];
+        }
+
+        @Override
+        public Object[] fetch(ResultSet row) {
+            try {
+                for(int i = 0; i < columns; i++) values[i] = row.getObject(i + 1);
+            } catch (SQLException e) {
+                e.printStackTrace();
+                it.close();
+                return null;
+            }
+            return values;
+        }
+    }
+
     public static class RowIterator<T> implements AutoCloseable, Iterator<T>, Iterable<T> {
         PreparedStatement statement;
         Fetcher<T> fetcher;
         ResultSet row;
         ResultSetMetaData meta;
         String[] names;
-        int columns;
         boolean pre = true;
         boolean has = false;
         boolean dirty = true;
 
         RowIterator(PreparedStatement statement, Fetcher<T> fetcher) throws SQLException {
+            this(statement.executeQuery(), fetcher);
             this.statement = statement;
+        }
+
+        RowIterator(ResultSet row, Fetcher<T> fetcher) throws SQLException {
+            this.row = row;
             this.fetcher = fetcher;
-            row = statement.executeQuery();
             meta = row.getMetaData();
-            columns = meta.getColumnCount();
-            names = new String[columns];
-            for(int i = 0; i < columns; i++) names[i] = meta.getColumnName(i + 1);
+            names = new String[meta.getColumnCount()];
+            for(int i = 0; i < names.length; i++) names[i] = meta.getColumnName(i + 1);
             if(fetcher != null) fetcher.setup(this);
         }
 
@@ -439,14 +479,45 @@ public class Db implements AutoCloseable {
     }
 
     public static Db connect(String type, String name, String user, String password, String host, int port) throws SQLException {
-        String pad = "oracle".equals(type) ? "thin:@" : "//";
-        String pad2 = "sqlserver".equals(type) ? ";database=" : "/";
-        String url = "jdbc:" + type + ":" + ("h2".equals(type) ? name : pad + host + ":" + port + pad2 + name);
-        return new Db(DriverManager.getConnection(url, user, password));
+        String pad = "//";
+        String pad2 = "/";
+        String url = null;
+        String schema = null;
+        switch(type) {
+        case "h2":
+            url = name;
+        break;
+        case "postgresql":
+            schema = "public";
+            if(port <= 0) port = 5432;
+        break;
+        case "mysql":
+            if(port <= 0) port = 3306;
+        break;
+        case "oracle":
+            pad = "thin:@";
+            schema = user.toUpperCase();
+            if(port <= 0) port = 1521;
+        break;
+        case "sqlserver":
+            pad2 = ";database=";
+            schema = "dbo";
+            if(port <= 0) port = 1433;
+        break;
+        }
+        if(host == null) host = "localhost";
+        if(url == null) url = pad + host + ":" + port + pad2 + name;
+        Db db = new Db(DriverManager.getConnection("jdbc:" + type + ":" + url, user, password));
+        db.schema = schema;
+        return db;
     }
 
     public static Db connect(String type, String name) throws SQLException {
         return connect(type, name, null, null, null, 0);
+    }
+
+    public static Db connect(String type, String name, String user, String password) throws SQLException {
+        return connect(type, name, user, password, null, 0);
     }
 
     @Override
