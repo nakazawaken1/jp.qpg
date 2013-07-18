@@ -35,12 +35,11 @@ public class Db implements AutoCloseable {
                 String table = "test_table";
                 System.out.println(db.tables());
                 if(db.tables().contains(table)) db.drop(table);
-                db.create(table, 1, new Column("id").integer(), new Column("name").text(10), new Column("birthday").date());
-                String[] names = { "id", "name", "birthday" };
+                String[] names = db.create(table, 1, new Column("id").integer(), new Column("name").text(10), new Column("birthday").date());
                 for(int i = 1; i <= 20; i++) {
                     Calendar c = Calendar.getInstance();
                     c.add(Calendar.DATE, -i * 31);
-                    db.insert(table, names, 1, i, "氏名" + i, c.getTime());
+                    db.insert(table, names, 1, i, "氏名'" + i, c.getTime());
                 }
                 System.out.println(db.from(table).count());
                 Query q = db.select("name", "birthday").from(table).where(db.builder.fn("MONTH", "birthday") + " > 6").asc("id");
@@ -154,10 +153,9 @@ public class Db implements AutoCloseable {
     private Connection connection;
     SqlBuilder builder;
     String schema;
-    public static SimpleDateFormat format = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss.SSS ");
 
     public static void log(Object o) {
-        System.out.println(format.format(new Date()) + ": " + o);
+        System.out.println(new SimpleDateFormat("yyyy/MM/dd HH:mm:ss.SSS ").format(new Date()) + ": " + o);
     }
 
     public static <T> String join(String prefix, Iterable<T> items, String pad) {
@@ -505,7 +503,6 @@ public class Db implements AutoCloseable {
         @Override
         public void close() {
             if(dirty) {
-                log("#clean");
                 try {
                     if(row != null) row.close();
                 } catch (SQLException e) {
@@ -556,7 +553,7 @@ public class Db implements AutoCloseable {
         if(url == null) url = pad + host + ":" + port + pad2 + name;
         if(builder == null) builder = new SqlBuilder();
         url = "jdbc:" + type + ":" + url;
-        log("connecting... " + url);
+        log(user + " is connecting... " + url);
         return new Db(DriverManager.getConnection(url, user, password), builder, schema);
     }
 
@@ -755,21 +752,20 @@ public class Db implements AutoCloseable {
         }
     }
 
-    public void create(String table, int primary, Column... columns) throws SQLException {
+    public String[] create(String table, int primary, Column... columns) throws SQLException {
         StringBuffer sql = new StringBuffer("CREATE TABLE ");
         sql.append(table).append("(");
         String pad = "";
-        String primaryKey = "";
+        String[] names = new String[columns.length];
+        int i = 0;
         for(Column column : columns) {
-            if(primary > 0) {
-                primaryKey += pad + column.name;
-                primary--;
-            }
+            names[i++] = column.name;
             sql.append(pad).append(column.name).append(" ").append(builder.type(column));
             pad = ", ";
         }
-        if(!primaryKey.isEmpty()) sql.append(", PRIMARY KEY(").append(primaryKey).append(")");
+        if(primary > 0) sql.append(join(", PRIMARY KEY(", Arrays.asList(names).subList(0, primary), ", ")).append(")");
         execute(sql.append(")").toString());
+        return names;
     }
 
     public void drop(String table) throws SQLException {
