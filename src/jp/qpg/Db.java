@@ -3,6 +3,7 @@
  */
 package jp.qpg;
 
+import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -35,14 +36,14 @@ public class Db implements AutoCloseable {
                 String table = "test_table";
                 System.out.println(db.tables());
                 if(db.tables().contains(table)) db.drop(table);
-                String[] names = db.create(table, 1, new Column("id").integer(), new Column("name").text(10), new Column("birthday").date());
+                String[] names = db.create(table, 1, new Column("id").integer(), new Column("name").text(10), new Column("birthday").date(), new Column("weight").decimal(4, 1));
                 for(int i = 1; i <= 20; i++) {
                     Calendar c = Calendar.getInstance();
                     c.add(Calendar.DATE, -i * 31);
-                    db.insert(table, names, 1, i, "氏名'" + i, c.getTime());
+                    db.insert(table, names, 1, i, "氏名'" + i, c.getTime(), BigDecimal.valueOf(Math.random() * 80 + 40));
                 }
                 System.out.println(db.from(table).count());
-                Query q = db.select("name", "birthday").from(table).where(db.builder.fn("MONTH", "birthday") + " > 6").asc("id");
+                Query q = db.select("name", "birthday", "weight").from(table).where(db.builder.fn("MONTH", "birthday") + " > 6").asc("id");
                 System.out.println(q.count());
                 for(Data<Object[]> row : q.limit(3)) {
                     for(int i = 0; i < row.names.length; i++) {
@@ -415,26 +416,25 @@ public class Db implements AutoCloseable {
 
     public static class ObjectFetcher implements Fetcher<Object[]> {
         RowIterator<Object[]> it;
-        Object[] values;
         int columns;
 
         @Override
         public void setup(RowIterator<Object[]> it) {
             this.it = it;
             columns = it.names.length;
-            values = new Object[columns];
         }
 
         @Override
         public Object[] fetch(ResultSet row) {
             try {
+                Object[] values = new Object[columns];
                 for(int i = 0; i < columns; i++) values[i] = row.getObject(i + 1);
+                return values;
             } catch (SQLException e) {
                 e.printStackTrace();
                 it.close();
                 return null;
             }
-            return values;
         }
     }
 
@@ -571,6 +571,8 @@ public class Db implements AutoCloseable {
     }
 
     public static class SqlBuilder {
+        public boolean supportNullString = true;
+
         public String sql(Query q) {
             StringBuffer sql = new StringBuffer();
             sql.append("SELECT ").append(q.fields == null ? "*" : join("", q.fields, ", "));
@@ -601,6 +603,7 @@ public class Db implements AutoCloseable {
 
         public Object type(Column column) {
             if(Date.class.isAssignableFrom(column.type)) return "DATE";
+            if(BigDecimal.class.isAssignableFrom(column.type)) return "DECIMAL(" + column.length + ", " + column.scale + ")";
             if(Number.class.isAssignableFrom(column.type)) return "INTEGER";
             return "VARCHAR(" + (column.length > 0 ? column.length : 255) + ")";
         }
@@ -675,6 +678,9 @@ public class Db implements AutoCloseable {
     }
 
     public static class OracleBuilder extends SqlBuilder {
+        public OracleBuilder() {
+            supportNullString = false;
+        }
         @Override
         public String fn(String function, String... args) {
             switch(function) {
@@ -685,6 +691,7 @@ public class Db implements AutoCloseable {
             }
             return function + "(" + join("", Arrays.asList(args), ", ") + ")";
         }
+
         @Override
         public String sql(Query q) {
             StringBuffer sql = new StringBuffer();
@@ -716,38 +723,59 @@ public class Db implements AutoCloseable {
         String display;
         Class<?> type;
         int length;
+        int scale;
         boolean nullable;
         Object value;
+
         public Column(String name) {
             this.name = name;
         }
+
         public Column date() {
             type = Date.class;
             return this;
         }
+
         public Column integer() {
             type = Long.class;
             return this;
         }
+
+        public Column decimal(int precision, int scale) {
+            type = BigDecimal.class;
+            length = precision;
+            this.scale = scale;
+            return this;
+        }
+
         public Column text() {
             type = String.class;
             return this;
         }
+
         public Column text(int length) {
             type = String.class;
             this.length = length;
             return this;
         }
+
         public Column type(Class<?> type) {
             this.type = type;
             return this;
         }
+
         public Column display(String name) {
             display = name;
             return this;
         }
+
         public Column length(int length) {
             this.length = length;
+            return this;
+        }
+
+        public Column nullable() {
+            this.nullable = true;
             return this;
         }
     }
@@ -761,6 +789,7 @@ public class Db implements AutoCloseable {
         for(Column column : columns) {
             names[i++] = column.name;
             sql.append(pad).append(column.name).append(" ").append(builder.type(column));
+            if(!column.nullable && builder.supportNullString ) sql.append(" NOT NULL");
             pad = ", ";
         }
         if(primary > 0) sql.append(join(", PRIMARY KEY(", Arrays.asList(names).subList(0, primary), ", ")).append(")");
